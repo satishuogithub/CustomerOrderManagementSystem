@@ -2,19 +2,71 @@ const express = require("express");
 const app = express();
 const sqlite3 = require("sqlite3");
 const { open } = require("sqlite");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken"); 
 const port = 3000;
 
-app.use(express.static(__dirname)); 
+app.use(express.static(__dirname)); // Serve static files from the current directory
+app.use(express.json()); // Parse JSON request bodies
+
+const dbPath = "./randomdb.db"; // 
+
+// Secret key for JWT (change this to a secure value)
+const secretKey = "random-string";
 
 app.get("/", (req, res) => {
     res.sendFile(__dirname + "./index.html");
 });
 
-const dbPath = "./customer_orders.db"; 
+// Middleware for JWT authentication
+function authenticateToken(req, res, next) {
+    const token = req.header("Authorization");
+    if (token == null) return res.sendStatus(401);
 
-app.use(express.urlencoded({ extended: true });
+    jwt.verify(token, secretKey, (err, user) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
+        next();
+    });
+}
 
-app.get("/get-customer/:customerId", async (req, res) => {
+app.post("/login", async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const db = await open({
+            filename: dbPath,
+            driver: sqlite3.Database,
+        });
+
+        // Query to find a user by email
+        const user = await db.get("SELECT * FROM users WHERE email = ?", [email]);
+
+        if (user) {
+            // Compare the provided password with the hashed password stored in the database
+            const isPasswordValid = await bcrypt.compare(password, user.password);
+
+            if (isPasswordValid) {
+                // Password is valid, generate and return a JWT token for authentication
+                const token = jwt.sign({ id: user.id, email: user.email }, secretKey);
+                res.status(200).json({ token });
+            } else {
+                // Password is not valid
+                res.status(401).send("Invalid password");
+            }
+        } else {
+            // User with the provided email not found
+            res.status(404).send("User not found.");
+        }
+
+        await db.close();
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).send("Error during login.");
+    }
+});
+
+app.get("/get-customer/:customerId", authenticateToken, async (req, res) => {
     try {
         const { customerId } = req.params;
 
@@ -39,7 +91,7 @@ app.get("/get-customer/:customerId", async (req, res) => {
     }
 });
 
-app.get("/get-product/:productId", async (req, res) => {
+app.get("/get-product/:productId", authenticateToken, async (req, res) => {
     try {
         const { productId } = req.params;
 
@@ -64,7 +116,7 @@ app.get("/get-product/:productId", async (req, res) => {
     }
 });
 
-app.get("/get-customer-order/:orderId", async (req, res) => {
+app.get("/get-customer-order/:orderId", authenticateToken, async (req, res) => {
     try {
         const { orderId } = req.params;
 
@@ -89,7 +141,7 @@ app.get("/get-customer-order/:orderId", async (req, res) => {
     }
 });
 
-app.get("/get-customer-orders-for-product/:productId", async (req, res) => {
+app.get("/get-customer-orders-for-product/:productId", authenticateToken, async (req, res) => {
     try {
         const { productId } = req.params;
 
